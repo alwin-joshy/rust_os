@@ -5,17 +5,18 @@
 mod framebuffer;
 
 // use bootloader_api::{entry_point, BootInfo};
-use core::{panic::PanicInfo};
+use core::{panic::PanicInfo, fmt::Write};
 use conquer_once::spin::OnceCell;
 use bootloader_x86_64_common::logger::LockedLogger;
 use bootloader_api::info::FrameBufferInfo;
+use bootloader_api::config::{BootloaderConfig, Mapping};
 
 pub(crate) static LOGGER: OnceCell<LockedLogger> = OnceCell::uninit();
 pub(crate) fn init_logger(buffer: &'static mut [u8], info: FrameBufferInfo) {
     let logger = LOGGER.get_or_init(move || LockedLogger::new(buffer, info, true, false));
     log::set_logger(logger).expect("Logger already set");
     log::set_max_level(log::LevelFilter::Trace);
-    log::info!("Hello, Kernel Mode!");
+    // log::info!("Hello, Kernel Mode!");
 }
 
 #[panic_handler]
@@ -23,7 +24,13 @@ fn panic(_info : &PanicInfo) -> ! {
     loop {}
 }
 
-bootloader_api::entry_point!(kernel_main);
+pub static BOOTLOADER_CONFIG : BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config
+};
+
+bootloader_api::entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 
 // ↓ this replaces the `_start` function ↓
 fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
@@ -46,6 +53,16 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
 
         // finally, initialize the logger using the last two variables
         init_logger(raw_frame_buffer, frame_buffer_info);
+
+        // log::info!("Physical vaddr = {:?}", )
     }
+
+    log::info!("Writing to {:x}", boot_info.physical_memory_offset.into_option().unwrap() as usize + 0x3F8);
+    
+    let mut uart = unsafe { uart_16550::MmioSerialPort::new(boot_info.physical_memory_offset.into_option().unwrap() as usize + 0x3F8) };
+    uart.init();
+    uart.write_str("hello world!\r\n").unwrap();
+    log::info!("Ok at least we didn't crash this time");
+    
     loop{}
 }
